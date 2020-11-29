@@ -1,0 +1,185 @@
+---
+title: "Statistical inference with the GSS data"
+output:
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+  word_document: default
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+```
+
+### Load data
+
+Make sure your data and R Markdown files are in the same directory. When loaded
+your data file will be called `gss`. Delete this note when before you submit 
+your work. 
+
+```{r load-data}
+load("gss.Rdata")
+```
+
+
+* * *
+
+## Part 1: Data
+The survey randomly samples all household across the United States, eligible individual within each household are given equal oppotunity to answer the interview. Starting from 2004, GSS began to use a two-stage subsampling design for nonresponse. The second stage focused on gaining cooperation from people who did not response in the first stage. Because random sampling is employed, the results are likely to be able to generalize to the whole U.S. population, with cautions on person-level variables, since people from large households have lower chance to be selected. In addition, we can weight up the responses obtained from second-stage sampling beginning in 2004, in order to compensate for the non-response bias in the surveys before 2004.
+
+There is no random assignment, so from the survey we can only infer correlation but not causation.
+
+
+## Part 2: Research question
+What are some factors related to people's political view? One can easily name a lot: sex, race, education level, social status... As an international student who come to California for graduate school, my personal experience is that my classmates are more on the liberal side --- there are some riots in our campus when president Trump won the election. So I am curious to see if there is a significant correlation between U.S. citizen's political opinion and their education level or geographical location.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+First select the three variables we are interested in: people's highest degree, geographical location, and their political views. We will exclude rows with missing political views.
+```{r}
+mydata <- gss %>% select(degree, region, polviews)
+mydata <- mydata %>% filter(!is.na(polviews))
+```
+
+Next, let's grouping people based on their education degree, and see what the distribution of political views looks like within each group. We find that the the distribution belongs to people with a graduate degree is more uniform compare to others. This indicates that people recieved higher education have more diverse political views: they tend to have a stronger political opinion -- either liberal or conservative, while people with lower degree (like lower than high school.high school) tend to find themselves on the middle part of the political view spectrum.
+
+```{r fig.width=8, fig.height=12}
+ggplot(mydata, aes(x= polviews,  group=degree)) + 
+    geom_bar(aes(y = ..prop.., fill = ..x..), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5, size = 3) +
+    facet_wrap(~degree, ncol=2) +
+    scale_y_continuous(labels = scales::percent) +
+    theme(axis.text.x=element_text(angle=90,hjust=0.5,vjust=0.5), legend.position="none") 
+```
+
+Similar to the analysis above, we look at how political view and geographical location are related. It seems people in the pacific are more likely to consider themselves as liberal versus people in the rest of the country. We will later use inference to findout whether there is indeed a significant difference between people's political view and their location.
+
+```{r fig.width=8, fig.height=18}
+ggplot(mydata, aes(x= polviews,  group=region)) + 
+    geom_bar(aes(y = ..prop.., fill = ..x..), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5, size = 3) +
+    facet_wrap(~region, ncol=2) +
+    scale_y_continuous(labels = scales::percent) +
+    theme(axis.text.x=element_text(angle=90,hjust=0.5,vjust=0.5), legend.position="none")
+```
+
+* * *
+
+## Part 4: Inference
+
+#### Inference between education level and the extremeness of political view
+The first hypothese test is on whether the extremeness of people's political view is significantly different among people who recieved higher education and lower education. To describe "extremeness", we define a new numerical variable "pol_extrm" from the original variable "polviews", larger value of this variable means the stronger political views.
+```{r}
+mydata <- mydata %>%
+  mutate(pol_extrm = NA)
+mydata$pol_extrm[mydata$polviews == 'Moderate'] = 0
+mydata$pol_extrm[mydata$polviews == 'Slightly Conservative' | mydata$polviews == 'Slightly Liberal'] = 1
+mydata$pol_extrm[mydata$polviews == 'Conservative' | mydata$polviews == 'Liberal'] = 2
+mydata$pol_extrm[mydata$polviews == 'Extrmly Conservative' | mydata$polviews == 'Extrmly Liberal'] = 3
+```
+
+We also group people into lower and higher education groups, higher education group includes graduate and bachelor degree, lower education group includes lower than high school, high school and junior college, missing values are filtered.
+```{r}
+testdata <- mydata %>%
+  filter(!is.na(degree))
+testdata <- mydata %>%
+  mutate(education = ifelse(degree %in% c("Graduate", "Bachelor"), "high", "low"))
+testdata %>% group_by(education) %>%
+  summarise(mean_political_view = mean(pol_extrm, na.rm=TRUE), std=sd(pol_extrm, na.rm=TRUE), count=n())
+```
+We see the mean extremeness of high and low education groups are different, we will use t-statistic to determine whether this difference is due to chance or not, although we note because of the large sample size, the t-distribution would be nearly normal, so it would be the same as doing z-test. First check the condition to do t-test:
+
+* Within high and low education groups, because the data are randomly sampled, we assume people's response are independent of each other.
+* Each group consist of < 10% of the whole U.S. population.
+* The high and low education groups are not paired.
+* As we see from the bar plots, within each group, the sample distribution are not too skewed.
+
+And our hypotheses are:
+
+$H_0$: There is no significant difference in the average extremeness of political views between high and low education people. $\mu_{high} = \mu_{low}$
+
+$H_1$: There is some difference in the average extremeness of political views between high and low education people. $\mu_{high} \neq \mu_{low}$
+
+```{r}
+xdiff = 1.1073586-0.8932207
+SE = sqrt(0.8344328^2/10469 + 0.9016376^2/37407)
+t = (xdiff)/SE
+message("t test statistic: ", t)
+p_value = pt(t, 10468, lower.tail = FALSE)
+message("p_value: ", p_value)
+t_ = qt(0.975, 10468)
+ci = c(xdiff-t_*SE, " ", xdiff+t_*SE)
+message("95% confidence interval: ", ci)
+```
+We can also use the inference function to do hypothese test and compute confidence interval.
+```{r}
+inference(y=pol_extrm, x=education, data=testdata, type='ci', statistic="mean", method="theoretical", alternative="twosided")
+```
+
+```{r}
+inference(y=pol_extrm, x=education, data=testdata, type='ht', statistic="mean", method="theoretical", alternative="twosided")
+```
+The resulting p-value is very small. Consistently, the confidence interval does not contain 0. Thus we reject the null hypothese that the average extremeness of political views are the same with low and high education groups.
+
+
+## Inference between geographical location and the political view
+In this case, we can use $\chi^2$ test to check if there is any relation between geographical location and the political views, because we have one categrical variable (geographical location) as exploratory variable and one categroical variable with more two levels (political views) as response variables. First check the condition for $\chi^2$ test:
+
+* The data are sampled randomly, people's response are independent of each other.
+
+* The sample size < 10% of the total population of U.S.
+
+* The political views and geographical location have been catergorized in a mutully exclusive way, so each person only contribute to one cell.
+
+* All cells have value > 5, we can see from the contingency table.
+
+our hypothesis will be:
+
+$H_0:$ Political views and people's geographical location are independent.
+
+$H_A:$ Political views and people's geographical location are dependent.
+
+For simplicity we will pick two geographical location: pacific (where California belongs to) and W. Sou. Central (where Texas belongs), and see the distribution of political views is significantly different among these two regions.
+
+```{r}
+#create contingency table
+testdata <- mydata %>%
+  filter(region %in% c("Pacific", "W. Sou. Central"))
+testdata$region <- factor(testdata$region)
+contingency_tbl = table(testdata$region, testdata$polviews)
+message("contingency table")
+contingency_tbl
+
+#based on contingency table, add margins and compute the expected observations.
+m0 = margin.table(contingency_tbl)
+m1 = margin.table(contingency_tbl, margin=1)
+m2 = margin.table(contingency_tbl, margin=2)
+expect_table = m1 %o% m2 / m0
+message("expected values: row_sum * col_sum / total_sum")
+expect_table
+
+#compute test statistic and p_value
+#chi = sum (Oi-Ei)^2/Ei
+chi2 = sum((contingency_tbl-expect_table)^2/expect_table)
+message("chi square test statistic: ", chi2)
+p_value = pchisq(chi2, (2-1) * (7-1), lower.tail = FALSE)
+message("p_value: ", p_value)
+```
+
+We can also do the inference using function chisq.test(). The $\chi^2$ value agree with our manual calculation above, the p-value is a bit different (likely because it is too small, the function did not seek to achieve unnecessary numerical accuracy).
+```{r}
+chisq.test(testdata$region, testdata$polviews)
+```
+Because of the very small p-value, we will reject the null hypotheses that the political views and people's geographical location are independent, and conclude that people's political views vary when moving from pacific to W. Sou. Central area. Note $\chi^2$ test does not provide confidence interval.
+
